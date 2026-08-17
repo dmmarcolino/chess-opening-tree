@@ -1,0 +1,3 @@
+# os PGNs brutos nao precisam ir pro git (podem ser grandes);
+# os tree_white.json / tree_black.json processados sim.
+raw/*.pgn

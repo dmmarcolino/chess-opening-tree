@@ -1,0 +1,1609 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Repertório — árvore de aberturas</title>
+<!-- usado so pra reconstruir a posicao do tabuleiro a partir da sequencia de lances (SAN) ja presente nos dados -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.js"></script>
+<!-- fonte com desenho mais bonito pros glifos de xadrez do Unicode (a fonte padrao do sistema costuma ser tosca aqui) -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Symbols&family=Noto+Sans+Symbols+2&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg: #14170f;
+    --bg-panel: #1b1f16;
+    --bg-row: #20251a;
+    --bg-row-hover: #2a3122;
+    --ink: #e9e3d3;
+    --ink-dim: #a6a190;
+    --ink-faint: #6c6a5e;
+    --hairline: #34392b;
+    --gold: #c79a3e;
+    --win: #5c8a5a;
+    --draw: #b8963f;
+    --loss: #a4453b;
+    --serif: "Source Serif 4", "Iowan Old Style", Georgia, serif;
+    --mono: "IBM Plex Mono", "JetBrains Mono", SFMono-Regular, Consolas, monospace;
+    --sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  *{ box-sizing: border-box; }
+  html,body{ margin:0; padding:0; }
+  body{
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    min-height: 100vh;
+  }
+
+  a{ color: inherit; }
+
+  .layout{
+    display: grid;
+    grid-template-columns: 300px 1fr;
+    max-width: 1180px;
+    margin: 0 auto;
+    min-height: 100vh;
+  }
+  @media (max-width: 860px){
+    .layout{ grid-template-columns: 1fr; }
+  }
+
+  /* ---------- topo ---------- */
+  .masthead{
+    grid-column: 1 / -1;
+    padding: 34px 28px 18px;
+    border-bottom: 1px solid var(--hairline);
+    position: relative;
+  }
+  .masthead .eyebrow{
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--gold);
+    margin: 0 0 6px;
+  }
+  .masthead h1{
+    font-family: var(--serif);
+    font-weight: 600;
+    font-size: 30px;
+    margin: 0;
+    letter-spacing: .01em;
+  }
+  .masthead p{
+    color: var(--ink-dim);
+    font-size: 14px;
+    margin: 8px 0 0;
+    max-width: 60ch;
+    line-height: 1.5;
+  }
+
+  /* ---------- sidebar ---------- */
+  .sidebar{
+    padding: 24px 20px 40px;
+    border-right: 1px solid var(--hairline);
+  }
+  @media (max-width: 860px){
+    .sidebar{ border-right: none; border-bottom: 1px solid var(--hairline); }
+  }
+
+  .toggle{
+    display: flex;
+    border: 1px solid var(--hairline);
+    border-radius: 6px;
+    overflow: hidden;
+    margin-bottom: 22px;
+  }
+  .toggle button{
+    flex: 1;
+    background: transparent;
+    color: var(--ink-dim);
+    border: none;
+    padding: 10px 8px;
+    font-family: var(--sans);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    letter-spacing: .02em;
+  }
+  .toggle button.active{
+    background: var(--bg-row);
+    color: var(--ink);
+  }
+  .toggle button:first-child{ border-right: 1px solid var(--hairline); }
+
+  .stat-block{ margin-bottom: 26px; }
+  .stat-block h2{
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin: 0 0 10px;
+  }
+  .score-big{
+    font-family: var(--serif);
+    font-size: 40px;
+    line-height: 1;
+    margin: 0;
+  }
+  .score-big small{
+    font-family: var(--sans);
+    font-size: 13px;
+    color: var(--ink-dim);
+    font-weight: 400;
+    margin-left: 6px;
+  }
+  .wdl-line{
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--ink-dim);
+    margin: 10px 0 8px;
+  }
+  .wdl-line b{ color: var(--ink); font-weight: 600; }
+
+  .bar{
+    height: 8px;
+    border-radius: 4px;
+    overflow: hidden;
+    display: flex;
+    background: var(--bg-row);
+  }
+  .bar span{ display:block; height: 100%; }
+  .bar .w{ background: var(--win); }
+  .bar .d{ background: var(--draw); }
+  .bar .l{ background: var(--loss); }
+
+  .weak-list{ list-style: none; margin: 0; padding: 0; }
+  .weak-list li{
+    padding: 9px 0;
+    border-bottom: 1px solid var(--hairline);
+    cursor: pointer;
+  }
+  .weak-list li:last-child{ border-bottom: none; }
+  .weak-list .line{
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--ink);
+    display: block;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .weak-list .meta{
+    font-size: 11px;
+    color: var(--ink-faint);
+  }
+  .weak-list .meta .pct{ color: var(--loss); font-weight: 600; }
+  .empty-hint{
+    color: var(--ink-faint);
+    font-size: 12.5px;
+    line-height: 1.5;
+  }
+
+  .search{
+    width: 100%;
+    background: var(--bg-row);
+    border: 1px solid var(--hairline);
+    color: var(--ink);
+    padding: 9px 10px;
+    border-radius: 6px;
+    font-family: var(--sans);
+    font-size: 13px;
+    margin-bottom: 4px;
+  }
+  .search::placeholder{ color: var(--ink-faint); }
+
+  /* ---------- painel principal ---------- */
+  .ledger-wrap{ padding: 24px 24px 60px; }
+
+  .caret{
+    color: var(--ink-faint);
+    font-size: 10px;
+    transition: transform .12s ease;
+    width: 12px;
+  }
+  .caret.open{ transform: rotate(90deg); }
+  .caret.leaf{ visibility: hidden; }
+
+  .move{
+    font-family: var(--mono);
+    font-size: 13.5px;
+    color: var(--ink);
+    white-space: nowrap;
+  }
+  .ply-num{ color: var(--ink-faint); }
+
+  .transp-badge{
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 15px;
+    height: 15px;
+    border-radius: 50%;
+    background: rgba(199,154,62,.16);
+    color: var(--gold);
+    font-size: 9.5px;
+    margin-left: 5px;
+    cursor: help;
+  }
+
+  .edge-count{
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--ink-faint);
+    margin-left: 6px;
+  }
+
+  .n-games{
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--ink-dim);
+    text-align: right;
+  }
+
+  .mini-bar{
+    height: 7px;
+    border-radius: 3px;
+    overflow: hidden;
+    display: flex;
+    background: var(--bg-row);
+  }
+
+  .score-pct{
+    font-family: var(--mono);
+    font-size: 12.5px;
+    text-align: right;
+    font-weight: 600;
+  }
+  .score-pct.good{ color: var(--win); }
+  .score-pct.mid{ color: var(--draw); }
+  .score-pct.bad{ color: var(--loss); }
+
+  .status{
+    color: var(--ink-faint);
+    font-size: 13px;
+    padding: 40px 0;
+    text-align: center;
+  }
+
+  footer{
+    grid-column: 1 / -1;
+    padding: 18px 28px 40px;
+    color: var(--ink-faint);
+    font-size: 11.5px;
+    border-top: 1px solid var(--hairline);
+  }
+
+  /* ---------- botao de configuracao + painel de nicks ---------- */
+  .gear-btn{
+    position: absolute;
+    top: 30px;
+    right: 28px;
+    background: none;
+    border: 1px solid var(--hairline);
+    color: var(--ink-dim);
+    width: 34px;
+    height: 34px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 15px;
+    line-height: 1;
+  }
+  .gear-btn:hover{ color: var(--gold); border-color: var(--gold); }
+
+  .config-overlay{
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(10,11,7,.7);
+    z-index: 50;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 60px 20px;
+  }
+  .config-overlay.open{ display: flex; }
+
+  .config-panel{
+    background: var(--bg-panel);
+    border: 1px solid var(--hairline);
+    border-radius: 10px;
+    width: 100%;
+    max-width: 480px;
+    padding: 26px;
+  }
+  .config-panel h3{
+    font-family: var(--serif);
+    font-size: 19px;
+    margin: 0 0 4px;
+  }
+  .config-panel .sub{
+    color: var(--ink-dim);
+    font-size: 13px;
+    margin: 0 0 20px;
+    line-height: 1.5;
+  }
+
+  .nick-group{ margin-bottom: 18px; }
+  .nick-group h4{
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin: 0 0 8px;
+  }
+  .nick-chip{
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--bg-row);
+    border: 1px solid var(--hairline);
+    border-radius: 20px;
+    padding: 5px 6px 5px 12px;
+    font-family: var(--mono);
+    font-size: 13px;
+    margin: 0 6px 6px 0;
+  }
+  .nick-chip button{
+    background: none;
+    border: none;
+    color: var(--ink-faint);
+    cursor: pointer;
+    font-size: 13px;
+    line-height: 1;
+    padding: 4px;
+  }
+  .nick-chip button:hover{ color: var(--loss); }
+  .no-nicks{ color: var(--ink-faint); font-size: 12.5px; }
+
+  .add-nick-form{
+    display: flex;
+    gap: 8px;
+    margin-top: 18px;
+    padding-top: 18px;
+    border-top: 1px solid var(--hairline);
+  }
+  .add-nick-form select,
+  .add-nick-form input{
+    background: var(--bg-row);
+    border: 1px solid var(--hairline);
+    color: var(--ink);
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-family: var(--sans);
+    font-size: 13px;
+  }
+  .add-nick-form select{ flex: 0 0 120px; }
+  .add-nick-form input{ flex: 1; }
+  .add-nick-form button{
+    background: var(--gold);
+    color: #1c1f14;
+    border: none;
+    border-radius: 6px;
+    padding: 8px 14px;
+    font-family: var(--sans);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .add-nick-form button:disabled{ opacity: .5; cursor: default; }
+
+  .config-status{
+    font-size: 12px;
+    margin-top: 10px;
+    min-height: 16px;
+    color: var(--ink-dim);
+  }
+  .config-status.err{ color: var(--loss); }
+  .config-status.ok{ color: var(--win); }
+
+  .config-close{
+    display: block;
+    margin: 20px auto 0;
+    background: none;
+    border: none;
+    color: var(--ink-faint);
+    font-size: 12.5px;
+    cursor: pointer;
+  }
+
+  /* ---------- botao "atualizar agora" ---------- */
+  .refresh-block{
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 26px;
+  }
+  .refresh-btn{
+    background: transparent;
+    border: 1px solid var(--gold);
+    color: var(--gold);
+    border-radius: 6px;
+    padding: 9px 14px;
+    font-family: var(--sans);
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .refresh-btn:hover:not(:disabled){ background: rgba(199,154,62,.12); }
+  .refresh-btn:disabled{
+    opacity: .5;
+    cursor: default;
+    border-color: var(--hairline);
+    color: var(--ink-faint);
+  }
+  .refresh-meta{
+    font-size: 11.5px;
+    color: var(--ink-faint);
+    line-height: 1.4;
+  }
+  .refresh-meta .msg{ display: block; }
+  .refresh-meta .msg.err{ color: var(--loss); }
+  .refresh-meta .msg.ok{ color: var(--win); }
+
+  /* ---------- filtros ---------- */
+  .filters{ margin-bottom: 26px; }
+  .filters h2{
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin: 0 0 10px;
+  }
+
+  .date-quick{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 10px;
+  }
+  .date-quick button{
+    background: var(--bg-row);
+    border: 1px solid var(--hairline);
+    color: var(--ink-dim);
+    border-radius: 20px;
+    padding: 5px 12px;
+    font-family: var(--sans);
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .date-quick button.active{
+    background: rgba(199,154,62,.14);
+    border-color: var(--gold);
+    color: var(--gold);
+  }
+
+  .date-inputs{
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .date-inputs span{ color: var(--ink-faint); font-size: 12px; }
+  .date-inputs input[type="date"]{
+    flex: 1;
+    min-width: 0;
+    background: var(--bg-row);
+    border: 1px solid var(--hairline);
+    color: var(--ink);
+    border-radius: 6px;
+    padding: 6px 8px;
+    font-family: var(--sans);
+    font-size: 12px;
+    color-scheme: dark;
+  }
+
+  .more-filters-toggle{
+    background: none;
+    border: none;
+    color: var(--gold);
+    font-family: var(--sans);
+    font-size: 12px;
+    cursor: pointer;
+    padding: 0;
+  }
+
+  .more-filters{
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 1px solid var(--hairline);
+  }
+  .filter-group{ margin-bottom: 16px; }
+  .filter-group:last-child{ margin-bottom: 0; }
+  .filter-group h4{
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin: 0 0 8px;
+  }
+  .filter-group label{
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 12.5px;
+    color: var(--ink-dim);
+    padding: 3px 0;
+    cursor: pointer;
+  }
+  .filter-group input[type="checkbox"]{
+    accent-color: var(--gold);
+    width: 13px;
+    height: 13px;
+  }
+  #nick-filter-list{
+    max-height: 140px;
+    overflow-y: auto;
+  }
+
+  /* ---------- explorador: breadcrumb + tabuleiro + lista de lances de um nivel ---------- */
+  .breadcrumb{
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 2px;
+    margin-bottom: 20px;
+    font-family: var(--mono);
+    font-size: 13px;
+  }
+  .breadcrumb .crumb{
+    background: none;
+    border: none;
+    color: var(--ink-dim);
+    cursor: pointer;
+    padding: 4px 7px;
+    border-radius: 4px;
+    white-space: nowrap;
+    font-family: var(--mono);
+    font-size: 13px;
+  }
+  .breadcrumb .crumb:hover{ background: var(--bg-row-hover); color: var(--ink); }
+  .breadcrumb .crumb.current{ color: var(--gold); font-weight: 600; cursor: default; }
+  .breadcrumb .crumb.current:hover{ background: none; }
+  .breadcrumb .sep{ color: var(--ink-faint); }
+
+  .explorer-body{
+    display: flex;
+    gap: 32px;
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .board-panel{ flex: 0 0 auto; width: min(360px, 100%); }
+  .board{
+    width: 100%;
+    aspect-ratio: 1;
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+    grid-template-rows: repeat(8, 1fr);
+    border-radius: 6px;
+    overflow: hidden;
+    border: 1px solid var(--hairline);
+  }
+  .sq{
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+  }
+  .sq.light{ background: #d9cdb2; }
+  .sq.dark{ background: #7c6a4e; }
+  .sq.last-from{ background: rgba(199,154,62,.38); }
+  .sq.last-to{ background: rgba(199,154,62,.55); }
+  .sq .piece{
+    font-family: "Noto Sans Symbols 2", "Noto Sans Symbols", "Segoe UI Symbol", "DejaVu Sans", sans-serif;
+    font-size: min(7.4vw, 34px);
+    line-height: 1;
+    user-select: none;
+  }
+  .sq .piece.w{
+    color: #f4efe2;
+    -webkit-text-stroke: 1px #2b2320;
+    text-shadow: 0 0 2px #2b2320, 0 0 3px #2b2320;
+  }
+  .sq .piece.b{
+    color: #1c1710;
+    text-shadow: 0 0 2px rgba(244,239,226,.35);
+  }
+
+  .board-meta{
+    margin-top: 10px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--ink-faint);
+    text-align: center;
+  }
+
+  .nav-arrows{ display: flex; gap: 8px; margin-top: 10px; }
+  .nav-arrows button{
+    flex: 1;
+    background: var(--bg-row);
+    border: 1px solid var(--hairline);
+    color: var(--ink);
+    border-radius: 6px;
+    padding: 9px 0;
+    font-size: 15px;
+    cursor: pointer;
+  }
+  .nav-arrows button:hover:not(:disabled){ border-color: var(--gold); color: var(--gold); }
+  .nav-arrows button:disabled{ opacity: .35; cursor: default; }
+
+  .move-list-panel{ flex: 1 1 340px; min-width: 280px; }
+
+  .move-list{
+    border: 1px solid var(--hairline);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .move-row{
+    display: grid;
+    grid-template-columns: 20px auto 1fr 54px 60px 50px;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--hairline);
+    background: var(--bg-panel);
+    cursor: pointer;
+  }
+  .move-row:last-child{ border-bottom: none; }
+  .move-row:hover{ background: var(--bg-row-hover); }
+</style>
+</head>
+<body>
+
+<div class="layout">
+  <div class="masthead">
+    <p class="eyebrow">Repertório pessoal</p>
+    <h1>Árvore de aberturas</h1>
+    <p>Todas as partidas jogadas no Lichess e no Chess.com, organizadas lance a lance. As estatísticas são por <em>posição</em>, não por ordem de lances — quando duas ordens diferentes levam à mesma posição (transposição), elas são tratadas como uma coisa só e marcadas com <span class="transp-badge" style="margin-left:0">⇄</span>.</p>
+    <button class="gear-btn" id="open-config" title="Configurar nicks importados">⚙</button>
+  </div>
+
+  <div class="config-overlay" id="config-overlay">
+    <div class="config-panel">
+      <h3>Nicks importados</h3>
+      <p class="sub">Cada nick listado aqui é incluído na importação semanal (toda vez que o robô do GitHub Actions roda). Adicionar ou remover um nick só tem efeito na próxima execução — não é uma importação imediata.</p>
+
+      <div class="nick-group">
+        <h4>Lichess</h4>
+        <div id="nicks-lichess"><span class="no-nicks">carregando...</span></div>
+      </div>
+      <div class="nick-group">
+        <h4>Chess.com</h4>
+        <div id="nicks-chesscom"><span class="no-nicks">carregando...</span></div>
+      </div>
+
+      <form class="add-nick-form" id="add-nick-form">
+        <select id="new-nick-platform">
+          <option value="lichess">Lichess</option>
+          <option value="chesscom">Chess.com</option>
+        </select>
+        <input id="new-nick-value" type="text" placeholder="nick" autocomplete="off" required />
+        <button type="submit" id="add-nick-btn">Adicionar</button>
+      </form>
+      <p class="config-status" id="config-status"></p>
+
+      <button class="config-close" id="close-config">fechar</button>
+    </div>
+  </div>
+
+  <aside class="sidebar">
+    <div class="refresh-block">
+      <button class="refresh-btn" id="refresh-btn">↻ Atualizar agora</button>
+    </div>
+    <p class="refresh-meta" id="refresh-meta">
+      <span class="msg" id="refresh-msg"></span>
+      <span id="last-updated"></span>
+    </p>
+
+    <div class="toggle">
+      <button id="btn-white" class="active">Brancas</button>
+      <button id="btn-black">Pretas</button>
+    </div>
+
+    <div class="filters">
+      <h2>Filtrar por data</h2>
+      <div class="date-quick">
+        <button data-range="3m">3 meses</button>
+        <button data-range="6m">6 meses</button>
+        <button data-range="ytd">Este ano</button>
+        <button data-range="all" class="active">Tudo</button>
+      </div>
+      <div class="date-inputs">
+        <input type="date" id="date-from" />
+        <span>até</span>
+        <input type="date" id="date-to" />
+      </div>
+
+      <button class="more-filters-toggle" id="more-filters-toggle">mais filtros ▾</button>
+      <div class="more-filters" id="more-filters" hidden>
+        <div class="filter-group">
+          <h4>Site</h4>
+          <div id="site-filter">
+            <label><input type="checkbox" value="lichess" checked /> Lichess</label>
+            <label><input type="checkbox" value="chesscom" checked /> Chess.com</label>
+          </div>
+        </div>
+        <div class="filter-group">
+          <h4>Nick</h4>
+          <div id="nick-filter-list"><span class="no-nicks">carregando...</span></div>
+        </div>
+        <div class="filter-group">
+          <h4>Resultado</h4>
+          <div id="result-filter">
+            <label><input type="checkbox" value="win" checked /> Vitórias</label>
+            <label><input type="checkbox" value="draw" checked /> Empates</label>
+            <label><input type="checkbox" value="loss" checked /> Derrotas</label>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="stat-block">
+      <h2 id="stats-label">Aproveitamento geral</h2>
+      <p class="score-big" id="root-score">—<small id="root-games"></small></p>
+      <p class="wdl-line" id="root-wdl"></p>
+      <div class="bar" id="root-bar"></div>
+    </div>
+
+    <div class="stat-block">
+      <h2>Buscar lance nesta posição</h2>
+      <input class="search" id="search" type="text" placeholder="ex.: Nf3, e4..." />
+    </div>
+
+    <div class="stat-block">
+      <h2>Linhas a revisar</h2>
+      <p class="empty-hint" style="margin:0 0 8px">Aberturas com pelo menos 10 partidas e aproveitamento abaixo de 45%. Clique numa linha pra ir direto pra lá.</p>
+      <ul class="weak-list" id="weak-list"></ul>
+    </div>
+  </aside>
+
+  <main class="ledger-wrap">
+    <div class="breadcrumb" id="breadcrumb"></div>
+    <div class="explorer-body">
+      <div class="board-panel">
+        <div class="board" id="board"></div>
+        <div class="nav-arrows">
+          <button id="nav-back" title="Voltar um lance (ou tecla ←)">◀ voltar</button>
+          <button id="nav-forward" title="Avançar de novo (ou tecla →)" disabled>avançar ▶</button>
+        </div>
+        <div class="board-meta" id="board-meta"></div>
+      </div>
+      <div class="move-list-panel">
+        <div class="move-list" id="move-list">
+          <div class="status">Carregando dados...</div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    Gerado a partir de data/tree_white.json e data/tree_black.json. Atualizado automaticamente via GitHub Actions.
+  </footer>
+</div>
+
+<script>
+(function(){
+
+  // ---------- config: nicks importados (via Google Apps Script) ----------
+  // Cole aqui a URL do seu Web App do Apps Script depois de implantar
+  // (Extensões > Apps Script > Implantar > Nova implantação > Web app).
+  // Deixe como está ("") que o painel avisa que ainda não foi configurado.
+  const APPS_SCRIPT_URL = "";
+
+  const configOverlay = document.getElementById("config-overlay");
+  const nicksLichessEl = document.getElementById("nicks-lichess");
+  const nicksChesscomEl = document.getElementById("nicks-chesscom");
+  const statusEl = document.getElementById("config-status");
+  const addForm = document.getElementById("add-nick-form");
+  const addBtn = document.getElementById("add-nick-btn");
+
+  function setStatus(msg, kind){
+    statusEl.textContent = msg || "";
+    statusEl.className = "config-status" + (kind ? " " + kind : "");
+  }
+
+  function renderNickGroup(el, nicks, platform){
+    if (!nicks.length){
+      el.innerHTML = `<span class="no-nicks">nenhum nick cadastrado</span>`;
+      return;
+    }
+    el.innerHTML = nicks.map(n => `
+      <span class="nick-chip">${n}<button data-platform="${platform}" data-nick="${n}" title="remover">✕</button></span>
+    `).join("");
+    el.querySelectorAll("button[data-nick]").forEach(btn => {
+      btn.addEventListener("click", () => removeNick(btn.dataset.platform, btn.dataset.nick));
+    });
+  }
+
+  async function loadNicks(){
+    if (!APPS_SCRIPT_URL){
+      setStatus("APPS_SCRIPT_URL ainda não configurada no index.html — veja o README.", "err");
+      nicksLichessEl.innerHTML = `<span class="no-nicks">—</span>`;
+      nicksChesscomEl.innerHTML = `<span class="no-nicks">—</span>`;
+      return;
+    }
+    try{
+      const res = await fetch(APPS_SCRIPT_URL);
+      const data = await res.json();
+      const nicks = data.nicks || [];
+      renderNickGroup(nicksLichessEl, nicks.filter(n => n.platform === "lichess").map(n => n.nick), "lichess");
+      renderNickGroup(nicksChesscomEl, nicks.filter(n => n.platform === "chesscom").map(n => n.nick), "chesscom");
+    } catch(err){
+      console.error(err);
+      setStatus("Não foi possível carregar a lista de nicks.", "err");
+    }
+  }
+
+  async function addNick(platform, nick){
+    setStatus("Adicionando...");
+    addBtn.disabled = true;
+    try{
+      await fetch(APPS_SCRIPT_URL, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" }, // evita preflight CORS no Apps Script
+        body: JSON.stringify({ action: "add", platform, nick }),
+      });
+      setStatus(`"${nick}" adicionado. Vale a partir da próxima importação semanal.`, "ok");
+      await loadNicks();
+      addForm.reset();
+    } catch(err){
+      console.error(err);
+      setStatus("Erro ao adicionar o nick.", "err");
+    } finally {
+      addBtn.disabled = false;
+    }
+  }
+
+  async function removeNick(platform, nick){
+    setStatus("Removendo...");
+    try{
+      await fetch(APPS_SCRIPT_URL, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({ action: "remove", platform, nick }),
+      });
+      setStatus(`"${nick}" removido.`, "ok");
+      await loadNicks();
+    } catch(err){
+      console.error(err);
+      setStatus("Erro ao remover o nick.", "err");
+    }
+  }
+
+  document.getElementById("open-config").addEventListener("click", () => {
+    configOverlay.classList.add("open");
+    setStatus("");
+    loadNicks();
+  });
+  document.getElementById("close-config").addEventListener("click", () => {
+    configOverlay.classList.remove("open");
+  });
+  configOverlay.addEventListener("click", (e) => {
+    if (e.target === configOverlay) configOverlay.classList.remove("open");
+  });
+  addForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const platform = document.getElementById("new-nick-platform").value;
+    const nick = document.getElementById("new-nick-value").value.trim();
+    if (!nick) return;
+    addNick(platform, nick);
+  });
+
+  // ---------- atualizar agora (dispara o workflow sob demanda) ----------
+  const refreshBtn = document.getElementById("refresh-btn");
+  const refreshMsg = document.getElementById("refresh-msg");
+  const lastUpdatedEl = document.getElementById("last-updated");
+  let pollTimer = null;
+
+  function formatDate(iso){
+    if (!iso) return "";
+    const d = new Date(iso);
+    return d.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+  }
+
+  function showLastUpdated(){
+    const iso = (dataWhite && dataWhite.generated_at) || (dataBlack && dataBlack.generated_at);
+    lastUpdatedEl.textContent = iso ? `Dados de ${formatDate(iso)}` : "";
+  }
+
+  function setRefreshMsg(msg, kind){
+    refreshMsg.textContent = msg || "";
+    refreshMsg.className = "msg" + (kind ? " " + kind : "");
+  }
+
+  async function triggerImport(){
+    if (!APPS_SCRIPT_URL){
+      setRefreshMsg("APPS_SCRIPT_URL ainda não configurada — veja o README.", "err");
+      return;
+    }
+    refreshBtn.disabled = true;
+    setRefreshMsg("Disparando importação...");
+    try{
+      const res = await fetch(APPS_SCRIPT_URL, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({ action: "trigger_import" }),
+      });
+      const data = await res.json();
+      if (!data.ok){
+        setRefreshMsg(data.error || "Não foi possível disparar a importação.", "err");
+        refreshBtn.disabled = false;
+        return;
+      }
+      setRefreshMsg("Importação em andamento — costuma levar 1 a 3 minutos.");
+      startPolling();
+    } catch(err){
+      console.error(err);
+      setRefreshMsg("Erro ao disparar a importação.", "err");
+      refreshBtn.disabled = false;
+    }
+  }
+
+  async function startPolling(){
+    // busca o timestamp atual direto do servidor como referencia -- nao
+    // pode depender de dataWhite.generated_at aqui, porque com o
+    // carregamento sob demanda por cor, brancas pode nunca ter sido
+    // carregada ainda (ex.: usuario abriu o site direto em "Pretas")
+    let previousTimestamp = null;
+    try{
+      const baseRes = await fetch(`data/tree_white.json?t=${Date.now()}`);
+      if (baseRes.ok){
+        const baseData = await baseRes.json();
+        previousTimestamp = baseData.generated_at || null;
+      }
+    } catch(err){
+      console.warn("Nao foi possivel obter o timestamp atual antes de comecar a checar.", err);
+    }
+
+    let attempts = 0;
+    const maxAttempts = 18; // ~6 minutos, checando a cada 20s
+
+    clearInterval(pollTimer);
+    pollTimer = setInterval(async () => {
+      attempts++;
+      try{
+        const res = await fetch(`data/tree_white.json?t=${Date.now()}`); // cache-bust
+        if (res.ok){
+          const fresh = await res.json();
+          if (fresh.generated_at && fresh.generated_at !== previousTimestamp){
+            clearInterval(pollTimer);
+            await load(true);
+            setRefreshMsg("Atualizado com sucesso.", "ok");
+            refreshBtn.disabled = false;
+            return;
+          }
+        }
+      } catch(err){
+        console.warn("Poll falhou, tentando de novo...", err);
+      }
+      if (attempts >= maxAttempts){
+        clearInterval(pollTimer);
+        setRefreshMsg("Ainda processando — confira de novo em alguns minutos (ou dê F5).");
+        refreshBtn.disabled = false;
+      }
+    }, 20000);
+  }
+
+  refreshBtn.addEventListener("click", triggerImport);
+
+  // ---------- dados de exemplo (usados apenas se o fetch falhar, ex.: abrindo o arquivo localmente) ----------
+  // ---------- dados de exemplo (usados apenas se o fetch falhar, ex.: abrindo o arquivo localmente) ----------
+  const DEMO = {
+    generated_at: null,
+    games: [
+      { date: "2026-06-01", site: "lichess", nick: "demo", result: "win" },
+      { date: "2026-06-05", site: "lichess", nick: "demo", result: "draw" },
+      { date: "2026-06-10", site: "chesscom", nick: "demo2", result: "win" },
+    ],
+    start_id: 0,
+    // cada posicao e um item da lista; o indice na lista E o identificador.
+    // "c" = filhos: san -> [indice_do_filho, [ids_das_partidas]]. "g" so existe na raiz.
+    positions: [
+      /* 0 root */ { g: [0,1,2], c: { e4: [1, [0,1,2]] } },
+      /* 1 e4   */ { c: { c5: [2, [0,1]], e5: [3, [2]] } },
+      /* 2 c5   */ { c: { Nf3: [4, [0,1]] } },
+      /* 3 e5   */ { c: { Nf3: [5, [2]] } },
+      /* 4 Nf3a */ { c: {} },
+      /* 5 Nf3b */ { c: {} },
+    ]
+  };
+
+  let dataWhite = null, dataBlack = null, current = "white";
+  let aggWhite = null, aggBlack = null;      // Map(id posicao -> Set com TODAS as partidas que ja passaram ali, de qualquer ordem)
+  let allowedIds = new Set();                // partidas que passam no filtro ativo, para a cor sendo exibida
+  let activeGames = [];                      // catalogo de partidas da cor sendo exibida
+  let activeAgg = null;                      // aggWhite ou aggBlack, conforme a cor sendo exibida
+  let activePositions = null;                // mapa plano id -> posicao, da cor sendo exibida
+
+  const $ = (sel) => document.querySelector(sel);
+
+  const filters = {
+    dateFrom: null,
+    dateTo: null,
+    sites: new Set(["lichess", "chesscom"]),
+    nicks: null,   // populado dinamicamente apos carregar os dados (null = sem restricao ainda)
+    results: new Set(["win", "draw", "loss"]),
+  };
+
+  // ---------- motor de estatisticas (tudo recalculado na hora, a partir do filtro ativo) ----------
+  //
+  // O JSON traz o grafo ACHATADO e COMPACTO: `positions` e uma lista (o
+  // indice na lista e o id da posicao), cada posicao guarda so suas
+  // arestas de saida como pares [indice_do_filho, partidas] (sem repetir
+  // nomes de campo por extenso). Isso evita duplicar subarvores inteiras
+  // em transposicoes (uma versao anterior fazia isso e explodia
+  // combinatorialmente em repertorios reais) e mantem o arquivo pequeno
+  // mesmo com centenas de milhares de posicoes.
+  //
+  // O preco: o "total combinado" de uma posicao (quantas partidas
+  // passaram por ali, vindas de qualquer ordem) e se ela e uma
+  // transposicao (mais de um pai distinto) precisam ser calculados
+  // juntando as arestas de ENTRADA -- isso e feito uma unica vez, em
+  // buildAggregateMap, logo apos carregar.
+
+  function buildAggregateMap(positions, startId, totalGames){
+    const gameIds = new Map();    // indice da posicao -> Set com TODAS as partidas que ja passaram ali
+    const parentsOf = new Map();  // indice da posicao -> Set com os indices dos pais distintos (pra detectar transposicao)
+
+    // a posicao inicial "contem" todas as partidas, por definicao (nao tem aresta de entrada)
+    gameIds.set(startId, new Set(Array.from({ length: totalGames }, (_, i) => i)));
+
+    positions.forEach((pos, idx) => {
+      Object.values(pos.c || {}).forEach(([to, ids]) => {
+        if (!gameIds.has(to)) gameIds.set(to, new Set());
+        const s = gameIds.get(to);
+        ids.forEach(id => s.add(id));
+
+        if (!parentsOf.has(to)) parentsOf.set(to, new Set());
+        parentsOf.get(to).add(idx);
+      });
+    });
+
+    return { gameIds, parentsOf };
+  }
+
+  function computeAllowedIds(games, f){
+    const allowed = new Set();
+    games.forEach((g, id) => {
+      if (f.dateFrom && (!g.date || g.date < f.dateFrom)) return;
+      if (f.dateTo && (!g.date || g.date > f.dateTo)) return;
+      if (!f.sites.has(g.site)) return;
+      if (f.nicks && !f.nicks.has(g.nick)) return;
+      if (!f.results.has(g.result)) return;
+      allowed.add(id);
+    });
+    return allowed;
+  }
+
+  function statsFromIds(idsSet){
+    let n = 0, wins = 0, draws = 0, losses = 0;
+    idsSet.forEach(id => {
+      if (!allowedIds.has(id)) return;
+      n++;
+      const r = activeGames[id].result;
+      if (r === "win") wins++;
+      else if (r === "draw") draws++;
+      else losses++;
+    });
+    const score_pct = n ? Math.round(1000 * (wins + 0.5 * draws) / n) / 10 : 0;
+    return { games: n, wins, draws, losses, score_pct };
+  }
+
+  function statsForPosition(id){
+    // estatisticas da POSICAO (combinando todas as ordens que levam ali), ja filtradas
+    const idsSet = (activeAgg && activeAgg.gameIds.get(id)) || new Set();
+    return statsFromIds(idsSet);
+  }
+
+  function isTransposition(id){
+    const parents = activeAgg && activeAgg.parentsOf.get(id);
+    return !!(parents && parents.size > 1);
+  }
+
+  function localStats(gameIds){
+    // estatisticas so desta ARESTA especifica (este lance, a partir de um pai especifico), ja filtradas
+    return statsFromIds(new Set(gameIds || []));
+  }
+
+  function childrenOf(id){
+    const pos = activePositions[id];
+    if (!pos) return [];
+    return Object.entries(pos.c || {}).map(([san, edge]) => (
+      { san, to: edge[0], gameIds: edge[1] }
+    ));
+  }
+
+  function visibleChildrenOf(id){
+    // esconde ramos que ficaram sem nenhuma partida sob o filtro atual
+    return childrenOf(id).filter(c => localStats(c.gameIds).games > 0);
+  }
+
+  function scoreClass(pct){
+    if (pct >= 55) return "good";
+    if (pct >= 45) return "mid";
+    return "bad";
+  }
+
+  function miniBar(stats){
+    const total = stats.games || 1;
+    const w = 100 * stats.wins / total, d = 100 * stats.draws / total, l = 100 * stats.losses / total;
+    return `<div class="mini-bar" style="width:56px">
+      <span class="w" style="width:${w}%"></span>
+      <span class="d" style="width:${d}%"></span>
+      <span class="l" style="width:${l}%"></span>
+    </div>`;
+  }
+
+  // ---------- renderizacao da arvore (navegacao construida sob demanda a partir do grafo) ----------
+
+  // ---------- estado de navegacao (posicao a posicao, como um explorador de aberturas) ----------
+  //
+  // navPath = sequencia de lances (com o id da posicao resultante) que leva
+  // da posicao inicial ate onde voce esta agora. So os FILHOS da ultima
+  // posicao aparecem na lista de lances -- pra ver os outros lances do
+  // lance 1, use o breadcrumb ou o botao de voltar.
+
+  let navPath = [];      // [{san, id}, ...]
+  let navForward = [];   // pilha de "refazer" (populada so pelo botao de voltar)
+
+  function currentPositionId(){
+    return navPath.length ? navPath[navPath.length - 1].id : currentData().start_id;
+  }
+
+  function navigateTo(newPath){
+    navPath = newPath;
+    navForward = [];
+    $("#search").value = "";
+    renderExplorer();
+  }
+
+  function goBack(){
+    if (navPath.length === 0) return;
+    navForward.push(navPath[navPath.length - 1]);
+    navPath = navPath.slice(0, -1);
+    $("#search").value = "";
+    renderExplorer();
+  }
+
+  function goForward(){
+    if (navForward.length === 0) return;
+    navPath = [...navPath, navForward.pop()];
+    $("#search").value = "";
+    renderExplorer();
+  }
+
+  function plyLabel(ply){
+    return ply % 2 === 1 ? `${Math.ceil(ply/2)}.` : `${Math.ceil(ply/2)}...`;
+  }
+
+  // ---------- breadcrumb ----------
+
+  function renderBreadcrumb(){
+    const el = $("#breadcrumb");
+    const rootLabel = current === "white" ? "Início · brancas" : "Início · pretas";
+    const parts = [`<button class="crumb ${navPath.length === 0 ? "current" : ""}" data-idx="-1">${rootLabel}</button>`];
+    navPath.forEach((step, i) => {
+      const isLast = i === navPath.length - 1;
+      parts.push(`<span class="sep">·</span>`);
+      parts.push(`<button class="crumb ${isLast ? "current" : ""}" data-idx="${i}">${plyLabel(i+1)}${step.san}</button>`);
+    });
+    el.innerHTML = parts.join("");
+    el.querySelectorAll(".crumb").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const idx = parseInt(btn.dataset.idx, 10);
+        navigateTo(idx < 0 ? [] : navPath.slice(0, idx + 1));
+      });
+    });
+  }
+
+  // ---------- tabuleiro ----------
+
+  const PIECE_GLYPH = { p: "♟", n: "♞", b: "♝", r: "♜", q: "♛", k: "♚" };
+
+  function renderBoard(){
+    const boardEl = $("#board");
+    boardEl.innerHTML = "";
+
+    const game = new Chess();
+    navPath.forEach(step => game.move(step.san));
+    const boardState = game.board(); // indice 0 = linha 8 (topo), cada linha vai de a a h
+
+    let lastFrom = null, lastTo = null;
+    if (navPath.length){
+      const hist = game.history({ verbose: true });
+      const last = hist[hist.length - 1];
+      if (last){ lastFrom = last.from; lastTo = last.to; }
+    }
+
+    const flip = current === "black"; // ve o tabuleiro do seu proprio lado ao navegar as partidas de pretas
+    for (let r = 0; r < 8; r++){
+      for (let c = 0; c < 8; c++){
+        const rank = flip ? 7 - r : r;
+        const file = flip ? 7 - c : c;
+        const piece = boardState[rank][file];
+        const squareName = "abcdefgh"[file] + (8 - rank);
+        const isLight = (rank + file) % 2 === 0;
+
+        const sq = document.createElement("div");
+        sq.className = `sq ${isLight ? "light" : "dark"}`;
+        if (squareName === lastFrom) sq.classList.add("last-from");
+        if (squareName === lastTo) sq.classList.add("last-to");
+        if (piece){
+          const span = document.createElement("span");
+          span.className = `piece ${piece.color}`;
+          span.textContent = PIECE_GLYPH[piece.type];
+          sq.appendChild(span);
+        }
+        boardEl.appendChild(sq);
+      }
+    }
+
+    const ply = navPath.length;
+    const turnLabel = ply % 2 === 0 ? "brancas jogam" : "pretas jogam";
+    $("#board-meta").textContent = ply === 0
+      ? "posição inicial"
+      : `depois de ${plyLabel(ply)}${navPath[ply-1].san} — ${turnLabel}`;
+
+    $("#nav-back").disabled = navPath.length === 0;
+    $("#nav-forward").disabled = navForward.length === 0;
+  }
+
+  // ---------- lista de lances (so os filhos da posicao atual) ----------
+
+  function renderMoveList(){
+    const posId = currentPositionId();
+    const listEl = $("#move-list");
+    const kids = visibleChildrenOf(posId)
+      .slice()
+      .sort((a, b) => localStats(b.gameIds).games - localStats(a.gameIds).games);
+
+    if (kids.length === 0){
+      listEl.innerHTML = `<div class="status">Nenhum lance registrado a partir daqui com o filtro atual.</div>`;
+      return;
+    }
+
+    const prefix = plyLabel(navPath.length + 1);
+
+    listEl.innerHTML = kids.map(child => {
+      const stats = statsForPosition(child.to);
+      const local = localStats(child.gameIds);
+      const hasKids = visibleChildrenOf(child.to).length > 0;
+
+      const transpBadge = isTransposition(child.to)
+        ? `<span class="transp-badge" title="Esta posição também é atingida por outra ordem de lances — os números mostrados já são o total combinado de todas as ordens.">⇄</span>`
+        : "";
+      const edgeCount = (local.games !== stats.games)
+        ? `<span class="edge-count" title="Quantas vezes você jogou este lance especificamente a partir daqui, com o filtro atual">(${local.games}x aqui)</span>`
+        : "";
+
+      return `
+        <div class="move-row" data-san="${child.san}" data-to="${child.to}">
+          <span class="caret ${hasKids ? "" : "leaf"}">▶</span>
+          <span class="move">${prefix}${child.san}${transpBadge}${edgeCount}</span>
+          <span class="n-games">${stats.games}</span>
+          ${miniBar(stats)}
+          <span class="score-pct ${scoreClass(stats.score_pct)}">${stats.score_pct}%</span>
+        </div>
+      `;
+    }).join("");
+
+    listEl.querySelectorAll(".move-row").forEach(row => {
+      row.addEventListener("click", () => {
+        navigateTo([...navPath, { san: row.dataset.san, id: Number(row.dataset.to) }]);
+      });
+    });
+
+    applySearchFilter();
+  }
+
+  function renderExplorer(){
+    renderBreadcrumb();
+    renderBoard();
+    renderMoveList();
+  }
+
+  // ---------- estatisticas da posicao atual (barra lateral) ----------
+
+  function renderSidebarStats(){
+    const posId = currentPositionId();
+    $("#stats-label").textContent = navPath.length === 0 ? "Aproveitamento geral" : "Aproveitamento nesta posição";
+    const stats = statsForPosition(posId);
+    $("#root-score").innerHTML = `${stats.score_pct}%<small>${stats.games} partida${stats.games === 1 ? "" : "s"}</small>`;
+    $("#root-wdl").innerHTML = `<b>${stats.wins}</b>V &nbsp; <b>${stats.draws}</b>E &nbsp; <b>${stats.losses}</b>D`;
+    const total = stats.games || 1;
+    $("#root-bar").innerHTML = `
+      <span class="w" style="width:${100*stats.wins/total}%"></span>
+      <span class="d" style="width:${100*stats.draws/total}%"></span>
+      <span class="l" style="width:${100*stats.losses/total}%"></span>
+    `;
+  }
+
+  // ---------- linhas a revisar (busca global no grafo, com atalho pra navegar direto) ----------
+
+  function findWeakLines(startId){
+    const results = [];
+    const visited = new Set([startId]);
+    const queue = [{ id: startId, path: [] }];
+    while (queue.length){
+      const { id, path } = queue.shift();
+      visibleChildrenOf(id).forEach(child => {
+        if (visited.has(child.to)) return;
+        visited.add(child.to);
+        const childPath = [...path, { san: child.san, id: child.to }];
+        const stats = statsForPosition(child.to);
+        if (stats.games >= 10 && stats.score_pct < 45){
+          results.push({
+            pathLabel: childPath.map(p => p.san).join(" "),
+            path: childPath,
+            games: stats.games,
+            score_pct: stats.score_pct,
+          });
+        }
+        queue.push({ id: child.to, path: childPath });
+      });
+    }
+    results.sort((a,b) => a.score_pct - b.score_pct);
+    return results.slice(0, 8);
+  }
+
+  function renderWeakList(startId){
+    const list = $("#weak-list");
+    const weak = findWeakLines(startId);
+    if (weak.length === 0){
+      list.innerHTML = `<li class="empty-hint" style="cursor:default;border:none;padding-top:2px">Nenhuma linha com dados suficientes com esse filtro.</li>`;
+      return;
+    }
+    list.innerHTML = weak.map((w, i) => `
+      <li data-idx="${i}">
+        <span class="line">${w.pathLabel}</span>
+        <span class="meta">${w.games} partidas · <span class="pct">${w.score_pct}%</span></span>
+      </li>
+    `).join("");
+    list.querySelectorAll("li[data-idx]").forEach(li => {
+      li.addEventListener("click", () => navigateTo(weak[Number(li.dataset.idx)].path));
+    });
+  }
+
+  // ---------- busca (filtra so a lista de lances da posicao atual) ----------
+
+  function applySearchFilter(){
+    const term = $("#search").value.trim().toLowerCase();
+    document.querySelectorAll("#move-list .move-row").forEach(row => {
+      const move = row.querySelector(".move").textContent.toLowerCase();
+      row.style.display = (!term || move.includes(term)) ? "" : "none";
+    });
+  }
+  $("#search").addEventListener("input", applySearchFilter);
+
+  $("#nav-back").addEventListener("click", goBack);
+  $("#nav-forward").addEventListener("click", goForward);
+
+  // setas do teclado: esquerda volta um lance; direita refaz o que foi
+  // desfeito (se veio de "voltar") ou avanca pelo lance mais jogado daqui
+  // -- nao interfere se o foco estiver num campo de texto (busca, datas, nick)
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    const tag = (document.activeElement && document.activeElement.tagName) || "";
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+
+    if (e.key === "ArrowLeft"){
+      e.preventDefault();
+      goBack();
+    } else if (e.key === "ArrowRight"){
+      e.preventDefault();
+      if (navForward.length > 0){
+        goForward();
+      } else {
+        const kids = visibleChildrenOf(currentPositionId())
+          .slice()
+          .sort((a, b) => localStats(b.gameIds).games - localStats(a.gameIds).games);
+        if (kids.length > 0){
+          navigateTo([...navPath, { san: kids[0].san, id: kids[0].to }]);
+        }
+      }
+    }
+  });
+
+  function currentData(){ return current === "white" ? dataWhite : dataBlack; }
+  function currentAgg(){ return current === "white" ? aggWhite : aggBlack; }
+
+  function render(){
+    const data = currentData();
+    activeGames = data.games;
+    activeAgg = currentAgg();
+    activePositions = data.positions;
+    allowedIds = computeAllowedIds(data.games, filters);
+
+    renderSidebarStats();
+    renderExplorer();
+    renderWeakList(data.start_id);
+    showLastUpdated();
+  }
+
+  $("#btn-white").addEventListener("click", async () => {
+    current = "white";
+    $("#btn-white").classList.add("active");
+    $("#btn-black").classList.remove("active");
+    navPath = []; navForward = [];
+    if (!loadedColors.white){
+      $("#move-list").innerHTML = `<div class="status">Carregando dados de brancas...</div>`;
+      await ensureColorLoaded("white");
+    }
+    render();
+  });
+  $("#btn-black").addEventListener("click", async () => {
+    current = "black";
+    $("#btn-black").classList.add("active");
+    $("#btn-white").classList.remove("active");
+    navPath = []; navForward = [];
+    if (!loadedColors.black){
+      $("#move-list").innerHTML = `<div class="status">Carregando dados de pretas...</div>`;
+      await ensureColorLoaded("black");
+    }
+    render();
+  });
+
+  // ---------- painel de filtros ----------
+
+  function setDateRange(preset){
+    const toIso = (d) => d.toISOString().slice(0, 10);
+    let from = null;
+    const today = new Date();
+    if (preset === "3m"){ const d = new Date(today); d.setMonth(d.getMonth() - 3); from = toIso(d); }
+    else if (preset === "6m"){ const d = new Date(today); d.setMonth(d.getMonth() - 6); from = toIso(d); }
+    else if (preset === "ytd"){ from = `${today.getFullYear()}-01-01`; }
+    else if (preset === "all"){ from = null; }
+
+    filters.dateFrom = from;
+    filters.dateTo = null;
+    $("#date-from").value = from || "";
+    $("#date-to").value = "";
+    document.querySelectorAll(".date-quick button").forEach(b => b.classList.toggle("active", b.dataset.range === preset));
+    render();
+  }
+
+  document.querySelectorAll(".date-quick button").forEach(b => {
+    b.addEventListener("click", () => setDateRange(b.dataset.range));
+  });
+
+  $("#date-from").addEventListener("change", (e) => {
+    filters.dateFrom = e.target.value || null;
+    document.querySelectorAll(".date-quick button").forEach(b => b.classList.remove("active"));
+    render();
+  });
+  $("#date-to").addEventListener("change", (e) => {
+    filters.dateTo = e.target.value || null;
+    document.querySelectorAll(".date-quick button").forEach(b => b.classList.remove("active"));
+    render();
+  });
+
+  $("#more-filters-toggle").addEventListener("click", () => {
+    const el = $("#more-filters");
+    const willShow = el.hidden;
+    el.hidden = !willShow;
+    $("#more-filters-toggle").textContent = willShow ? "menos filtros ▴" : "mais filtros ▾";
+  });
+
+  document.querySelectorAll("#site-filter input").forEach(cb => {
+    cb.addEventListener("change", () => {
+      filters.sites = new Set(
+        Array.from(document.querySelectorAll("#site-filter input:checked")).map(i => i.value)
+      );
+      render();
+    });
+  });
+  document.querySelectorAll("#result-filter input").forEach(cb => {
+    cb.addEventListener("change", () => {
+      filters.results = new Set(
+        Array.from(document.querySelectorAll("#result-filter input:checked")).map(i => i.value)
+      );
+      render();
+    });
+  });
+
+  function buildNickFilterList(){
+    const allNicks = new Set();
+    (dataWhite && dataWhite.games || []).forEach(g => allNicks.add(g.nick));
+    (dataBlack && dataBlack.games || []).forEach(g => allNicks.add(g.nick));
+
+    const container = $("#nick-filter-list");
+    if (allNicks.size === 0){
+      container.innerHTML = `<span class="no-nicks">nenhum nick nos dados ainda</span>`;
+      return;
+    }
+
+    const existing = new Set(Array.from(container.querySelectorAll("input")).map(i => i.value));
+
+    if (existing.size === 0){
+      // primeira vez que algum nick aparece: monta a lista do zero, tudo marcado
+      filters.nicks = new Set(allNicks);
+      container.innerHTML = Array.from(allNicks).sort().map(n => `
+        <label><input type="checkbox" value="${n}" checked /> ${n}</label>
+      `).join("");
+    } else {
+      // chamadas seguintes (ex.: a segunda cor acabou de carregar): so acrescenta
+      // os nicks novos, sem mexer na selecao que o usuario ja tiver feito
+      const newOnes = Array.from(allNicks).filter(n => !existing.has(n)).sort();
+      if (newOnes.length === 0) return;
+      newOnes.forEach(n => {
+        filters.nicks.add(n);
+        const label = document.createElement("label");
+        label.innerHTML = `<input type="checkbox" value="${n}" checked /> ${n}`;
+        container.appendChild(label);
+      });
+    }
+
+    // (re)associa os listeners de forma idempotente, cobre os novos e os antigos
+    container.querySelectorAll("input").forEach(cb => {
+      cb.onchange = () => {
+        filters.nicks = new Set(
+          Array.from(container.querySelectorAll("input:checked")).map(i => i.value)
+        );
+        render();
+      };
+    });
+  }
+
+  // ---------- carregamento inicial (sob demanda, por cor) ----------
+  //
+  // So a cor ativa (brancas, por padrao) e buscada quando a pagina abre.
+  // A outra cor so e buscada na primeira vez que o usuario troca o toggle
+  // -- evita baixar/interpretar os dois arquivos de uma vez quando a
+  // pessoa normalmente so quer ver um lado por visita.
+
+  const loadedColors = { white: false, black: false };
+
+  async function fetchColorData(color, forceFresh){
+    const bust = forceFresh ? `?t=${Date.now()}` : "";
+    const res = await fetch(`data/tree_${color}.json${bust}`);
+    if (!res.ok) throw new Error(`fetch falhou (${color})`);
+    const data = await res.json();
+    const agg = buildAggregateMap(data.positions, data.start_id, data.games.length);
+    if (color === "white"){ dataWhite = data; aggWhite = agg; }
+    else { dataBlack = data; aggBlack = agg; }
+    loadedColors[color] = true;
+  }
+
+  async function ensureColorLoaded(color){
+    if (loadedColors[color]) return;
+    try{
+      await fetchColorData(color, false);
+    } catch (err){
+      console.warn(`Nao foi possivel carregar data/tree_${color}.json, usando dados de exemplo.`, err);
+      const agg = buildAggregateMap(DEMO.positions, DEMO.start_id, DEMO.games.length);
+      if (color === "white"){ dataWhite = DEMO; aggWhite = agg; }
+      else { dataBlack = DEMO; aggBlack = agg; }
+      loadedColors[color] = true; // marca como "carregado" (com exemplo) pra nao tentar de novo sozinho
+    }
+    buildNickFilterList();
+  }
+
+  async function load(forceFresh){
+    if (forceFresh){
+      // recarrega so as cores que ja foram abertas ate agora (nao teria
+      // sentido ir buscar uma cor que o usuario nunca nem olhou)
+      const toReload = Object.keys(loadedColors).filter(c => loadedColors[c]);
+      await Promise.all(toReload.map(c => fetchColorData(c, true).catch(err => {
+        console.warn(`Falha ao atualizar dados de ${c}`, err);
+      })));
+      buildNickFilterList();
+      render();
+      return;
+    }
+    await ensureColorLoaded(current); // "white" na primeira carga da pagina
+    render();
+  }
+
+  load();
+})();
+</script>
+</body>
+</html>
