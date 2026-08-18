@@ -30,27 +30,46 @@ jobs:
             --apps-script-url "${{ secrets.APPS_SCRIPT_URL }}" \
             --output data/config.json
 
-      - name: Baixar partidas do Lichess (um arquivo por nick)
+      - name: Baixar partidas do Lichess (incremental, um arquivo por nick)
         env:
           LICHESS_TOKEN: ${{ secrets.LICHESS_TOKEN }}
         run: |
           mkdir -p data/raw
-          rm -f data/raw/lichess_*.pgn
           for nick in $(python -c "import json; print('\n'.join(json.load(open('data/config.json'))['lichess']))"); do
-            echo "Baixando Lichess: $nick"
-            python scripts/fetch_lichess.py "$nick" --output "data/raw/lichess_${nick}.pgn"
+            since=$(python scripts/fetch_state.py get lichess "$nick")
+            if [ -n "$since" ]; then
+              # margem de seguranca de 7 dias (o merge com deduplicacao cuida de
+              # qualquer sobreposicao -- e melhor buscar de novo umas partidas
+              # que ja tinhamos do que arriscar perder alguma por uma borda de data)
+              since=$(python -c "from datetime import datetime, timedelta; print((datetime.strptime('$since','%Y-%m-%d') - timedelta(days=7)).strftime('%Y-%m-%d'))")
+              echo "Baixando Lichess: $nick (incremental, desde $since)"
+              python scripts/fetch_lichess.py "$nick" --output "data/raw/lichess_${nick}.pgn" --since "$since"
+            else
+              echo "Baixando Lichess: $nick (primeira vez, historico completo)"
+              python scripts/fetch_lichess.py "$nick" --output "data/raw/lichess_${nick}.pgn"
+            fi
+            python scripts/fetch_state.py set lichess "$nick" "$(date -u +%Y-%m-%d)"
           done
 
-      - name: Baixar partidas do Chess.com (um arquivo por nick)
+      - name: Baixar partidas do Chess.com (incremental, um arquivo por nick)
         env:
           CHESSCOM_CONTACT_EMAIL: ${{ secrets.CHESSCOM_CONTACT_EMAIL }}
         run: |
-          rm -f data/raw/chesscom_*.pgn
           for nick in $(python -c "import json; print('\n'.join(json.load(open('data/config.json'))['chesscom']))"); do
-            echo "Baixando Chess.com: $nick"
-            python scripts/fetch_chesscom.py "$nick" \
-              --email "${{ secrets.CHESSCOM_CONTACT_EMAIL }}" \
-              --output "data/raw/chesscom_${nick}.pgn"
+            since=$(python scripts/fetch_state.py get chesscom "$nick")
+            if [ -n "$since" ]; then
+              echo "Baixando Chess.com: $nick (incremental, desde $since)"
+              python scripts/fetch_chesscom.py "$nick" \
+                --email "${{ secrets.CHESSCOM_CONTACT_EMAIL }}" \
+                --output "data/raw/chesscom_${nick}.pgn" \
+                --since "$since"
+            else
+              echo "Baixando Chess.com: $nick (primeira vez, historico completo)"
+              python scripts/fetch_chesscom.py "$nick" \
+                --email "${{ secrets.CHESSCOM_CONTACT_EMAIL }}" \
+                --output "data/raw/chesscom_${nick}.pgn"
+            fi
+            python scripts/fetch_state.py set chesscom "$nick" "$(date -u +%Y-%m)"
           done
 
       - name: Construir arvore de aberturas

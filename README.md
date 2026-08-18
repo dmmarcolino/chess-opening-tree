@@ -38,17 +38,46 @@ computador de quem acessa — renderizam igual em qualquer navegador.
 ├── index.html                    # site (front-end estático, sem build step)
 ├── apps-script/Code.gs           # backend leve (Google Apps Script): guarda os nicks e dispara o workflow
 ├── data/
-│   ├── raw/                      # PGNs brutos baixados (um arquivo por nick)
+│   ├── raw/                      # PGNs brutos (um arquivo por nick — historico acumulado, nao sobrescrito)
 │   ├── config.json               # ultima lista de nicks lida do Apps Script
+│   ├── fetch_state.json          # ate quando ja buscamos cada nick (permite buscas incrementais)
 │   ├── tree_white.json           # árvore combinada de quando você joga de brancas
 │   └── tree_black.json           # árvore combinada de quando você joga de pretas
 ├── scripts/
 │   ├── fetch_config.py           # busca a lista de nicks cadastrados no site
-│   ├── fetch_lichess.py          # baixa partidas de 1 nick via API do Lichess
-│   ├── fetch_chesscom.py         # baixa partidas de 1 nick via API do Chess.com
+│   ├── fetch_state.py            # guarda/le ate quando ja buscamos cada nick
+│   ├── pgn_merge.py              # mescla PGN novo com o existente, sem duplicar partidas
+│   ├── fetch_lichess.py          # baixa partidas de 1 nick via API do Lichess (completo ou incremental)
+│   ├── fetch_chesscom.py         # baixa partidas de 1 nick via API do Chess.com (completo ou incremental)
 │   └── build_tree.py             # monta a árvore + estatísticas a partir dos PGNs
 └── .github/workflows/update-tree.yml   # roda tudo automaticamente (agendado ou sob demanda)
 ```
+
+## Buscas incrementais
+
+Da segunda execução em diante, o workflow só busca partidas **novas** de
+cada nick (usando `--since`), em vez do histórico inteiro toda semana —
+isso evita que a importação fique cada vez mais lenta conforme o número
+de nicks/partidas cresce. Os detalhes:
+
+- **`data/fetch_state.json`** guarda, por nick, a data da última busca
+  bem-sucedida. Na primeira vez que um nick é cadastrado, não há estado
+  ainda, então a busca é completa (como sempre foi). Da próxima vez em
+  diante, só busca partidas depois dessa data.
+- As partidas novas são **mescladas** com o arquivo `data/raw/*.pgn` que
+  já existia (não sobrescrevem), usando a URL única de cada partida (tag
+  `[Site]` do PGN) para nunca duplicar uma partida já contabilizada — ver
+  `scripts/pgn_merge.py`.
+- Pro Lichess, a busca incremental usa uma margem de segurança de 7 dias
+  antes da última data guardada (a deduplicação garante que isso não gera
+  duplicata, só evita perder alguma partida por uma borda de fuso
+  horário/data). Pro Chess.com, como os arquivos são por mês inteiro, o
+  mês da última busca é sempre buscado de novo por completo (pra pegar
+  partidas jogadas depois da última vez naquele mesmo mês) — o mesmo
+  mecanismo de deduplicação evita repetição.
+- Os scripts de fetch agora também imprimem progresso durante o download
+  (a cada ~1 MB no Lichess, a cada mês processado no Chess.com), pra dar
+  pra saber se uma execução longa está progredindo ou realmente travada.
 
 ## Por que um Apps Script e não só um campo no site?
 
