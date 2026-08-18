@@ -39,7 +39,7 @@
   .layout{
     display: grid;
     grid-template-columns: 300px 1fr;
-    max-width: 1180px;
+    max-width: 1440px;
     margin: 0 auto;
     min-height: 100vh;
   }
@@ -539,40 +539,17 @@
     overflow-y: auto;
   }
 
-  /* ---------- explorador: breadcrumb + tabuleiro + lista de lances de um nivel ---------- */
-  .breadcrumb{
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 2px;
-    margin-bottom: 20px;
-    font-family: var(--mono);
-    font-size: 13px;
-  }
-  .breadcrumb .crumb{
-    background: none;
-    border: none;
-    color: var(--ink-dim);
-    cursor: pointer;
-    padding: 4px 7px;
-    border-radius: 4px;
-    white-space: nowrap;
-    font-family: var(--mono);
-    font-size: 13px;
-  }
-  .breadcrumb .crumb:hover{ background: var(--bg-row-hover); color: var(--ink); }
-  .breadcrumb .crumb.current{ color: var(--gold); font-weight: 600; cursor: default; }
-  .breadcrumb .crumb.current:hover{ background: none; }
-  .breadcrumb .sep{ color: var(--ink-faint); }
+  /* ---------- explorador: tabuleiro maior + coluna direita (historico em cima, arvore embaixo) ---------- */
 
   .explorer-body{
     display: flex;
     gap: 32px;
     flex-wrap: wrap;
+    justify-content: flex-start;
     align-items: flex-start;
   }
 
-  .board-panel{ flex: 0 0 auto; width: min(360px, 100%); }
+  .board-panel{ flex: 0 0 auto; width: min(460px, 100%); }
   .board{
     width: 100%;
     aspect-ratio: 1;
@@ -621,8 +598,90 @@
   .nav-arrows button:hover:not(:disabled){ border-color: var(--gold); color: var(--gold); }
   .nav-arrows button:disabled{ opacity: .35; cursor: default; }
 
-  .move-list-panel{ flex: 1 1 340px; min-width: 280px; }
+  /* coluna direita: dois paineis empilhados, cada um com altura propria e
+     rolagem interna -- e isso que impede o tabuleiro de ser empurrado pra
+     baixo conforme a lista de lances cresce */
+  .right-column{
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 400px;
+    min-width: 280px;
+    max-width: 460px;
+    height: min(540px, 70vh);
+    gap: 16px;
+  }
 
+  .move-history-panel{
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--hairline);
+    border-radius: 8px;
+    overflow: hidden;
+    background: var(--bg-panel);
+  }
+  .mh-root{
+    flex: 0 0 auto;
+    background: var(--bg-row);
+    border: none;
+    border-bottom: 1px solid var(--hairline);
+    color: var(--gold);
+    font-family: var(--sans);
+    font-size: 12px;
+    font-weight: 600;
+    text-align: left;
+    padding: 9px 12px;
+    cursor: pointer;
+  }
+  .mh-root:hover{ background: var(--bg-row-hover); }
+
+  .move-history{
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 10px 12px;
+    font-family: var(--mono);
+    font-size: 13.5px;
+    line-height: 2.1;
+  }
+  .mh-num{ color: var(--ink-faint); margin-right: 2px; }
+  .mh-move{
+    background: none;
+    border: none;
+    color: var(--ink);
+    font-family: var(--mono);
+    font-size: 13.5px;
+    cursor: pointer;
+    padding: 2px 5px;
+    border-radius: 4px;
+    margin-right: 4px;
+  }
+  .mh-move:hover{ background: var(--bg-row-hover); }
+  .mh-move.current{ background: rgba(199,154,62,.16); color: var(--gold); font-weight: 600; }
+
+  .moves-tree-panel{
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .moves-tree-panel h3{
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin: 0 0 8px;
+    flex: 0 0 auto;
+  }
+  .moves-tree-panel .move-list{
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    border: 1px solid var(--hairline);
+    border-radius: 8px;
+  }
   .move-list{
     border: 1px solid var(--hairline);
     border-radius: 8px;
@@ -767,7 +826,6 @@
   </aside>
 
   <main class="ledger-wrap">
-    <div class="breadcrumb" id="breadcrumb"></div>
     <div class="explorer-body">
       <div class="board-panel">
         <div class="board" id="board"></div>
@@ -777,9 +835,16 @@
         </div>
         <div class="board-meta" id="board-meta"></div>
       </div>
-      <div class="move-list-panel">
-        <div class="move-list" id="move-list">
-          <div class="status">Carregando dados...</div>
+      <div class="right-column">
+        <div class="move-history-panel">
+          <button class="mh-root" id="mh-root"></button>
+          <div class="move-history" id="move-history"></div>
+        </div>
+        <div class="moves-tree-panel">
+          <h3>Lances a partir daqui</h3>
+          <div class="move-list" id="move-list">
+            <div class="status">Carregando dados...</div>
+          </div>
         </div>
       </div>
     </div>
@@ -1187,22 +1252,36 @@
 
   // ---------- breadcrumb ----------
 
-  function renderBreadcrumb(){
-    const el = $("#breadcrumb");
-    const rootLabel = current === "white" ? "Início · brancas" : "Início · pretas";
-    const parts = [`<button class="crumb ${navPath.length === 0 ? "current" : ""}" data-idx="-1">${rootLabel}</button>`];
+  function renderMoveHistory(){
+    const rootBtn = $("#mh-root");
+    rootBtn.textContent = current === "white" ? "⟲ Início · brancas" : "⟲ Início · pretas";
+    rootBtn.onclick = () => navigateTo([]);
+
+    const el = $("#move-history");
+    if (navPath.length === 0){
+      el.innerHTML = `<span class="empty-hint" style="cursor:default">Posição inicial — clique num lance na árvore, abaixo, pra começar.</span>`;
+      return;
+    }
+
+    const parts = [];
     navPath.forEach((step, i) => {
+      const ply = i + 1;
+      if (ply % 2 === 1){
+        parts.push(`<span class="mh-num">${Math.ceil(ply/2)}.</span>`);
+      } else if (i === 0){
+        parts.push(`<span class="mh-num">1...</span>`);
+      }
       const isLast = i === navPath.length - 1;
-      parts.push(`<span class="sep">·</span>`);
-      parts.push(`<button class="crumb ${isLast ? "current" : ""}" data-idx="${i}">${plyLabel(i+1)}${step.san}</button>`);
+      parts.push(`<button class="mh-move ${isLast ? "current" : ""}" data-idx="${i}">${step.san}</button>`);
     });
-    el.innerHTML = parts.join("");
-    el.querySelectorAll(".crumb").forEach(btn => {
+    el.innerHTML = parts.join(" ");
+    el.querySelectorAll(".mh-move").forEach(btn => {
       btn.addEventListener("click", () => {
         const idx = parseInt(btn.dataset.idx, 10);
-        navigateTo(idx < 0 ? [] : navPath.slice(0, idx + 1));
+        navigateTo(navPath.slice(0, idx + 1));
       });
     });
+    el.scrollTop = el.scrollHeight; // sempre mostra o lance mais recente
   }
 
   // ---------- tabuleiro ----------
@@ -1316,7 +1395,7 @@
   }
 
   function renderExplorer(){
-    renderBreadcrumb();
+    renderMoveHistory();
     renderBoard();
     renderMoveList();
   }
