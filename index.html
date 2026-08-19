@@ -1419,26 +1419,43 @@
   // ---------- linhas a revisar (busca global no grafo, com atalho pra navegar direto) ----------
 
   function findWeakLines(startId){
+    // limiar de "dominancia": se um lance responde por essa fracao (ou mais)
+    // das partidas da posicao, a posicao e o que vem depois desse lance
+    // carregam basicamente a mesma informacao -- so a mais profunda das
+    // duas deve aparecer na lista (evita "1.d4 d6" e "1.d4 d6 c4" juntos
+    // quando c4 e jogado em quase 100% das vezes).
+    const DOMINANCE_THRESHOLD = 0.9;
+
     const results = [];
     const visited = new Set([startId]);
     const queue = [{ id: startId, path: [] }];
+
     while (queue.length){
       const { id, path } = queue.shift();
-      visibleChildrenOf(id).forEach(child => {
+      const stats = statsForPosition(id);
+      const kids = visibleChildrenOf(id);
+
+      const dominantChild = stats.games > 0
+        ? kids.find(c => (localStats(c.gameIds).games / stats.games) >= DOMINANCE_THRESHOLD)
+        : null;
+
+      kids.forEach(child => {
         if (visited.has(child.to)) return;
         visited.add(child.to);
-        const childPath = [...path, { san: child.san, id: child.to }];
-        const stats = statsForPosition(child.to);
-        if (stats.games >= 10 && stats.score_pct < 45){
-          results.push({
-            pathLabel: childPath.map(p => p.san).join(" "),
-            path: childPath,
-            games: stats.games,
-            score_pct: stats.score_pct,
-          });
-        }
-        queue.push({ id: child.to, path: childPath });
+        queue.push({ id: child.to, path: [...path, { san: child.san, id: child.to }] });
       });
+
+      // so entra na lista se for uma posicao real (nao a raiz), for fraca o
+      // suficiente, E nao tiver um lance dominante saindo dela (nesse caso
+      // deixamos a posicao mais especifica, depois desse lance, reportar por ela)
+      if (path.length > 0 && stats.games >= 10 && stats.score_pct < 45 && !dominantChild){
+        results.push({
+          pathLabel: path.map(p => p.san).join(" "),
+          path,
+          games: stats.games,
+          score_pct: stats.score_pct,
+        });
+      }
     }
     results.sort((a,b) => a.score_pct - b.score_pct);
     return results.slice(0, 8);
