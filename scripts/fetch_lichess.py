@@ -10,8 +10,14 @@ Uso:
 Quando --since e usado E ja existe um arquivo no caminho de --output, o
 resultado NAO sobrescreve esse arquivo -- as partidas novas sao
 mescladas com as que ja estavam la (sem duplicar, usando a URL da
-partida como identificador -- ver scripts/pgn_merge.py). Sem --since, o
-comportamento e o de sempre: baixa tudo e sobrescreve.
+partida como identificador -- ver scripts/pgn_merge.py).
+
+IMPORTANTE: se o arquivo de --output NAO existir (por qualquer motivo --
+primeira vez de verdade, ou o arquivo se perdeu por algum motivo, ex.:
+nao foi commitado), o --since e IGNORADO e o download e sempre completo.
+Isso e proposital: restringir por data sem ter nada pra mesclar faria a
+"atualizacao" apagar historico em vez de completa-lo -- foi exatamente
+esse bug que causou perda de partidas numa versao anterior deste script.
 
 Variavel de ambiente opcional:
     LICHESS_TOKEN  -> token pessoal (nao obrigatorio para dados publicos,
@@ -53,7 +59,7 @@ def fetch_lichess_games(username, download_path, token=None, since=None):
         params["since"] = date_to_ms(since)
 
     url = LICHESS_API_URL.format(username=username)
-    print(f"Buscando partidas de {username} no Lichess" + (f" desde {since}" if since else "") + "...")
+    print(f"Buscando partidas de {username} no Lichess" + (f" desde {since}" if since else " (historico completo)") + "...")
     sys.stdout.flush()
 
     resp = requests.get(url, headers=headers, params=params, stream=True, timeout=300)
@@ -86,17 +92,26 @@ if __name__ == "__main__":
     parser.add_argument(
         "--since",
         default=None,
-        help="Buscar apenas partidas a partir desta data (AAAA-MM-DD). "
-        "Se ja existir um arquivo em --output, o resultado e mesclado com "
-        "ele (sem duplicar) em vez de sobrescrever.",
+        help="Buscar apenas partidas a partir desta data (AAAA-MM-DD). So tem "
+        "efeito se ja existir um arquivo em --output pra mesclar o resultado; "
+        "caso contrario e ignorado e o download e completo.",
     )
     args = parser.parse_args()
 
-    incremental = bool(args.since) and os.path.exists(args.output)
+    has_existing_file = os.path.exists(args.output)
+    incremental = bool(args.since) and has_existing_file
+    # se pediram --since mas nao ha arquivo existente pra mesclar, ignora o
+    # --since por completo (busca tudo) -- ver aviso no topo do arquivo
+    effective_since = args.since if incremental else None
+
+    if args.since and not has_existing_file:
+        print(f"Aviso: --since foi passado mas {args.output} nao existe ainda -- "
+              f"ignorando --since e baixando o historico completo.", file=sys.stderr)
+
     download_target = args.output + ".incoming" if incremental else args.output
 
     try:
-        fetch_lichess_games(args.username, download_target, token=args.token, since=args.since)
+        fetch_lichess_games(args.username, download_target, token=args.token, since=effective_since)
     except requests.HTTPError as e:
         print(f"Erro ao buscar partidas do Lichess: {e}", file=sys.stderr)
         sys.exit(1)

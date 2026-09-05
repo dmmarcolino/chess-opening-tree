@@ -10,11 +10,12 @@ Uso:
 Quando --since e usado E ja existe um arquivo no caminho de --output, o
 resultado NAO sobrescreve esse arquivo -- as partidas baixadas agora sao
 mescladas com as que ja estavam la (sem duplicar, usando a URL da
-partida como identificador -- ver scripts/pgn_merge.py). Isso importa
-especialmente aqui porque a granularidade da Chess.com e por MES: o
-arquivo do mes atual e sempre baixado por inteiro de novo (pra pegar
-partidas jogadas depois da ultima busca), entao sem a fusao com
-deduplicacao ele apareceria duplicado.
+partida como identificador -- ver scripts/pgn_merge.py).
+
+IMPORTANTE: se o arquivo de --output NAO existir, o --since e IGNORADO e
+o download e sempre completo (todos os meses). Isso e proposital: ver
+o aviso equivalente em fetch_lichess.py -- restringir por data sem ter
+nada pra mesclar apagaria historico em vez de completa-lo.
 
 A Chess.com exige um User-Agent identificavel (com contato) para evitar
 bloqueios 403. Defina CHESSCOM_CONTACT_EMAIL no ambiente, ou passe --email.
@@ -48,7 +49,7 @@ def fetch_chesscom_games(username, download_path, contact_email, since=None):
             u for u in archive_urls if "/".join(u.split("/")[-2:]) >= since.replace("-", "/")
         ]
 
-    print(f"{len(archive_urls)} arquivo(s) mensal(is) a processar" + (f" (desde {since})" if since else "") + ".")
+    print(f"{len(archive_urls)} arquivo(s) mensal(is) a processar" + (f" (desde {since})" if since else " (historico completo)") + ".")
     sys.stdout.flush()
 
     all_pgns = []
@@ -83,9 +84,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--since",
         default=None,
-        help="Buscar apenas a partir deste mes (AAAA-MM). Se ja existir um "
-        "arquivo em --output, o resultado e mesclado com ele (sem duplicar) "
-        "em vez de sobrescrever.",
+        help="Buscar apenas a partir deste mes (AAAA-MM). So tem efeito se ja "
+        "existir um arquivo em --output pra mesclar o resultado; caso "
+        "contrario e ignorado e o download e completo.",
     )
     args = parser.parse_args()
 
@@ -97,11 +98,18 @@ if __name__ == "__main__":
         )
         args.email = "nao-informado@exemplo.com"
 
-    incremental = bool(args.since) and os.path.exists(args.output)
+    has_existing_file = os.path.exists(args.output)
+    incremental = bool(args.since) and has_existing_file
+    effective_since = args.since if incremental else None
+
+    if args.since and not has_existing_file:
+        print(f"Aviso: --since foi passado mas {args.output} nao existe ainda -- "
+              f"ignorando --since e baixando o historico completo.", file=sys.stderr)
+
     download_target = args.output + ".incoming" if incremental else args.output
 
     try:
-        fetch_chesscom_games(args.username, download_target, args.email, since=args.since)
+        fetch_chesscom_games(args.username, download_target, args.email, since=effective_since)
     except requests.HTTPError as e:
         print(f"Erro ao buscar partidas do Chess.com: {e}", file=sys.stderr)
         sys.exit(1)
